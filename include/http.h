@@ -159,10 +159,10 @@ typedef struct
 http_response_t;
 
 int parse_http_request(FILE * in, http_request_t *req);
-int stringify_http_request(fd_t out, http_request_t req);
+int send_http_request(fd_t out, http_request_t req);
 
 int parse_http_response(FILE * in, http_response_t *res);
-int stringify_http_response(fd_t out, http_response_t res);
+int send_http_response(fd_t out, http_response_t res);
 
 #endif//___HTTP_H__
 

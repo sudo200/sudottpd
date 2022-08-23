@@ -1,5 +1,8 @@
 #include "http_utils.h"
 
+#undef  ARRAYLEN
+#define ARRAYLEN(arr) (sizeof(arr) / sizeof(*arr))
+
 static const char *day2string[] = {
   "Sun",
   "Mon",
@@ -30,5 +33,94 @@ http_header_t get_date_header()
   return (http_header_t) {
     .name = "Date", .value = buffer
   };
+}
+
+int send_html_response
+(fd_t out, http_version_t version, http_status_code_t status, const char *html)
+{
+  if(html == NULL || out < 0)
+    return -1;
+
+  size_t content_length = strlen(html);
+  char cl_str[(int)((ceil(log10(content_length)) + 1 ) * sizeof(char))];
+  sprintf(cl_str, "%lu", content_length);
+
+  http_header_t headers[] = {
+    get_date_header(),
+    { .name="Content-Type", .value="text/html; charset=ascii" },
+    { .name="Server", .value="C" },
+    { .name="Content-Length", .value=cl_str },
+    { .name="Connection", .value="close" },
+  };
+
+  http_response_t res = {
+    .http_version = version,
+    .status = status,
+
+    .headers = headers,
+    .headers_len = ARRAYLEN(headers),
+
+    .payload = (void *) html,
+    .payload_len = content_length,
+  };
+  return send_http_response(out, res);
+}
+
+int send_file_response
+(fd_t out, http_version_t version, http_status_code_t status, const char *path)
+{
+  if(path == NULL || out < 0)
+    return -1;
+
+  FILE * file = fopen(path, "r");
+  if(file == NULL)
+    return -3;
+
+  size_t content_length = fsize(file);
+  char cl_str[(int)((ceil(log10(content_length)) + 1 ) * sizeof(char))];
+  sprintf(cl_str, "%lu", content_length);
+
+  const char *mime_type;
+  char *extention = strrchr(path, '.');
+  if(extention == NULL || (mime_type = mime_get(extention)) == NULL)
+    mime_type = mime_default;
+
+  http_header_t headers[] = {
+    get_date_header(),
+    { .name="Content-Type", .value=mime_type },
+    { .name="Server", .value="C" },
+    { .name="Content-Length", .value=cl_str },
+    { .name="Connection", .value="close" },
+  };
+
+  http_response_t res = {
+    .http_version = version,
+    .status = status,
+
+    .headers = headers,
+    .headers_len = ARRAYLEN(headers),
+
+    .payload = malloc(content_length),
+    .payload_len = content_length,
+  };
+
+  if(res.payload == NULL) {
+    fclose(file);
+    return -2;
+  }
+
+  if(fread(res.payload, 1, content_length, file) != content_length)
+  {
+    fclose(file);
+    return -1;
+  }
+  fclose(file);
+
+  int ret = 0;
+  if(send_http_response(out, res) < 0)
+    ret = -1;
+
+  free(res.payload);
+  return ret;
 }
 

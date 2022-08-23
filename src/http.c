@@ -120,7 +120,7 @@ int parse_http_request(FILE * in, http_request_t *req)
   return 0;
 }
 
-int stringify_http_request(fd_t out, http_request_t req)
+int send_http_request(fd_t out, http_request_t req)
 {
   // Method, URI and Version
   dprintf(out, "%s %s %s\r\n", http_method_to_string(req.method), req.url, http_version_to_string(req.http_version));
@@ -174,7 +174,7 @@ int parse_http_response(FILE * in, http_response_t *res)
   return 0;
 }
 
-int stringify_http_response(fd_t out, http_response_t res)
+int send_http_response(fd_t out, http_response_t res)
 {
   // Version & Status code
   dprintf(out, "%s %u\r\n", http_version_to_string(res.http_version), res.status);

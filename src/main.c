@@ -7,49 +7,80 @@
 
 #include <pthread.h>
 
+#include "mime.h"
 #include "server.h"
 #include "http.h"
 #include "http_utils.h"
 #include "http_server.h"
 
+#define BAD_REQUEST(fd) send_html_response(fd, HTTP_1_1, BAD_REQUEST, "<!DOCTYPE html>"\
+    "<html lang=\"en\">"\
+    "<head>"\
+    "<title>400 Bad Request</title>"\
+    "</head>"\
+    "<body>"\
+    "<h1>400 Bad Request</h1>"\
+    "<hr>"\
+    "</body>"\
+    "</html>"\
+    )
+
+#define INTERNAL_SERVER_ERROR(fd) send_html_response(fd, HTTP_1_1, INTERNAL_SERVER_ERROR,\
+    "<!DOCTYPE html>"\
+    "<html lang=\"en\">"\
+    "<head>"\
+    "<title>500 Internal Sever Error</title>"\
+    "</head>"\
+    "<body>"\
+    "<h1>500 Internal Server Error</h1>"\
+    "<hr>"\
+    "</body>"\
+    "</html>"\
+    )
+
+#define INSUFFICIENT_STORAGE(fd)  send_html_response(fd, HTTP_1_1, INSUFFICIENT_STORAGE,\
+    "<!DOCTYPE html>"\
+    "<html lang=\"en\">"\
+    "<head>"\
+    "<title>507 Insufficient Storage</title>"\
+    "</head>"\
+    "<body>"\
+    "<h1>507 Insufficient Storage</h1>"\
+    "<hr>"\
+    "</body>"\
+    "</html>"\
+    )
+
+#define NOT_FOUND(fd) send_html_response(fd, HTTP_1_1, NOT_FOUND,\
+    "<!DOCTYPE html>"\
+    "<html lang=\"en\">"\
+    "<head>"\
+    "<title>404 Not Found</title>"\
+    "</head>"\
+    "<body>"\
+    "<h1>404 Not Found</h1>"\
+    "<hr>"\
+    "</body>"\
+    "</html>"\
+    )
+
 static volatile http_server_t server;
 
 void * worker(void *);
 
-// ------------------------
-const char * content_type = "text/html";
-const char * response = "<!DOCTYPE html>"
-			"<html lang=\"en\">"
-			"<head>"
-			"<title>Hello there from C!</title>"
-			"<style>"
-			"html {"
-			"background-color: black;"
-			"color: whitesmoke;"
-			"font-family: sans-serif;"
-			"}"
-			"</style>"
-			"</head>"
-			"<body>"
-			"<h1>Hello there from C!</h1>"
-			"</body>"
-			"</html>";
-// ------------------------
-
-// {{{
-// SIGINT-Handler
+// {{{ SIGINT-Handler
 void sigint_handler(int ignore)
 {
   puts("\nReceived SIGINT, shutting down...");
   fclose(server.log);
   shutdown(server.serverfd, SHUT_RDWR);
   close(server.serverfd);
+  mime_unload();
   exit(EXIT_SUCCESS);
 }
 // }}}
 
-// {{{
-// Main
+// {{{ Main
 int main(int argc, char **argv)
 {
   const struct sigaction sigint = {
@@ -58,6 +89,15 @@ int main(int argc, char **argv)
   sigaction(SIGINT, &sigint, NULL);
 
   server.log = stdout;
+
+  FILE * mime_types = fopen("mime.types", "r");
+  if(mime_types == NULL)
+  {
+    fprintf(server.log, "[MAIN] Couldn't open mime.types file: %m\n");
+    return EXIT_FAILURE;
+  }
+  mime_load(mime_types);
+  fclose(mime_types);
 
   const uint8_t server_addr[4] = {127,0,0,1};
   server.serverfd = mkserver_inet(server_addr, 8080, 0xFF);
@@ -82,7 +122,8 @@ int main(int argc, char **argv)
       fprintf(server.log, "[MAIN] Error handling connection: %m\n");
       continue;
     }
-    uint32_t ip_addr = *(uint32_t *) &addr.sin_addr;
+    uint32_t ip_addr = *(uint32_t *)&addr.sin_addr;
+    
     fprintf(server.log, "[MAIN] Incoming connection from %u.%u.%u.%u:%u!\n",
         ip_addr & 0x000000FF,
         (ip_addr & 0x0000FF00) >> 8,
@@ -99,8 +140,7 @@ int main(int argc, char **argv)
 }
 // }}}
 
-// {{{
-// Worker
+// {{{ Worker
 void * worker(void *p)
 {
   FILE * connection = (FILE *) p;
@@ -108,37 +148,51 @@ void * worker(void *p)
 
   http_request_t req = {};
 
-  int code = parse_http_request(connection, &req);
+  if(parse_http_request(connection, &req) < 0)
+  {
+    BAD_REQUEST(confd);
+    return NULL;
+  }
 
-  if(req.url) free((void *) req.url);
-  if(req.headers) free(req.headers);
-  if(req.payload) free(req.payload);
+  const char * rootdir = "public";
+  char * full_path = (char *) malloc(strlen(rootdir)+strlen(req.url)+1);
+  if(full_path == NULL)
+  {
+    INSUFFICIENT_STORAGE(confd);
+    goto finish;
+  }
+  strcpy(full_path, rootdir);
+  strcat(full_path, req.url);
 
   fprintf(server.log, "[WORKER] Incoming request! Sending response...\n");
 
-  http_response_t res = {};
+  switch(send_file_response(confd, HTTP_1_1, OK, full_path))
+  {
+    case -1: // Internal Server Error
+      INTERNAL_SERVER_ERROR(confd);
+      break;
 
-  size_t content_length = strlen(response);
-  char cl_str[(int)((ceil(log10(content_length)) + 1 ) * sizeof(char))];
-  sprintf(cl_str, "%lu", content_length);
+    case -2: // Insufficient Storage
+      INSUFFICIENT_STORAGE(confd);
+      break;
 
-  res.http_version = HTTP_1_1;
-  res.status = OK;
-  http_header_t headers[] = {
-    get_date_header(),
-    { .name="Content-Type", .value=content_type },
-    { .name="Server", .value="C" },
-    { .name="Content-Length", .value=cl_str },
-    { .name="Connection", .value="close" },
-  };
-  res.headers = headers;
-  res.headers_len = 5;
+    case -3: // Not Found
+      NOT_FOUND(confd);
+      break;
 
-  res.payload = (void *) response;
-  res.payload_len = content_length;
+    default:
+      break;
+  }
 
-  stringify_http_response(confd, res);
-
+  free(full_path);
+finish:
+  if(req.url) free((void *) req.url);
+  for(size_t i = 0; i < req.headers_len; i++) {
+    free((void *) req.headers[i].name);
+    free((void *) req.headers[i].value);
+  }
+  if(req.headers) free(req.headers);
+  if(req.payload) free(req.payload);
   fclose(connection);
   fprintf(server.log, "[WORKER] Response sent!\n");
 

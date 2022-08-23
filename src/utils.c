@@ -43,4 +43,16 @@ int fpeekstrcmp(FILE * stream, const char * str)
   return (res == 0);
 }
 
+size_t fsize(FILE * stream)
+{
+  fpos_t pos;
+  size_t start = 0, end = 0;
+  fgetpos(stream, &pos);
+  fseek(stream, 0L, SEEK_SET);
+  start = ftell(stream);
+  fseek(stream, 0L, SEEK_END);
+  end = ftell(stream);
+  fsetpos(stream, &pos);
+  return end - start;
+}
 

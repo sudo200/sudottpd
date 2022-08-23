@@ -28,5 +28,12 @@ char * fpeeks(FILE * stream, size_t n);
  */
 int fpeekstrcmp(FILE * stream, const char * str);
 
+/**
+ * Returns the amount of bytes in a file.
+ * @param stream  The file stream referring to the file.
+ * @returns Amount of bytes in the file.
+ */
+size_t fsize(FILE * stream);
+
 #endif//___UTILS_H__
 

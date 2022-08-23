@@ -8,6 +8,12 @@
 #include "utils.h"
 
 /**
+ * Defines the default MIME-Type, which should be used,
+ * if mime_get returns NULL
+ */
+static const char *mime_default = "application/octet-stream";
+
+/**
  * Loads MIME-Types mappings from a mime.types-style file
  * @param file The mime.types file
  * @return 0, if successful, else value describing the error
