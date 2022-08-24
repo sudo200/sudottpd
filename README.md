@@ -6,8 +6,8 @@ A very very basic http server written in 100% C.
 
 ## Feature checklist
 
-[x] Basic file serving
-[ ] Index file serving
-[ ] Directory listing
-[ ] CGI Support
+* [x] Basic file serving
+* [ ] Index file serving
+* [ ] Directory listing
+* [ ] CGI Support
 
