@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <math.h>
 #include <signal.h>
 #include <stdio.h>
@@ -5,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <sys/stat.h>
 #include <pthread.h>
 
 #include "mime.h"
@@ -66,6 +68,8 @@
 
 static volatile http_server_t server;
 
+const char * rootdir = "public";
+
 void * worker(void *);
 
 // {{{ SIGINT-Handler
@@ -98,6 +102,12 @@ int main(int argc, char **argv)
   }
   mime_load(mime_types);
   fclose(mime_types);
+
+  if(mkdir(rootdir, 0777) < 0 && errno != EEXIST)
+  {
+    fprintf(server.log, "[MAIN] Couldn't create directory \"%s\": %m\n", rootdir);
+    return EXIT_FAILURE;
+  }
 
   const uint8_t server_addr[4] = {127,0,0,1};
   server.serverfd = mkserver_inet(server_addr, 8080, 0xFF);
@@ -154,7 +164,6 @@ void * worker(void *p)
     return NULL;
   }
 
-  const char * rootdir = "public";
   char * full_path = (char *) malloc(strlen(rootdir)+strlen(req.url)+1);
   if(full_path == NULL)
   {
