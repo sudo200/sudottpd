@@ -8,6 +8,6 @@ A very very basic http server written in 100% C.
 
 * [x] Basic file serving
 * [ ] Index file serving
-* [ ] Directory listing
+* [x] Directory listing
 * [ ] CGI Support
 

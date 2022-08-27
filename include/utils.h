@@ -1,6 +1,7 @@
 #ifndef ___UTILS_H__
 #define ___UTILS_H__
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,12 @@ int fpeekstrcmp(FILE * stream, const char * str);
  * @returns Amount of bytes in the file.
  */
 size_t fsize(FILE * stream);
+
+int vasprintf(char **str, const char *format, va_list args);
+
+int asprintf(char **str, const char *format, ...);
+
+char * strcata(char **dest, const char *src);
 
 #endif//___UTILS_H__
 

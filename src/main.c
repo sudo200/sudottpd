@@ -9,11 +9,13 @@
 #include <sys/stat.h>
 #include <pthread.h>
 
+#include "ls.h"
 #include "mime.h"
 #include "server.h"
 #include "http.h"
 #include "http_utils.h"
 #include "http_server.h"
+#include "utils.h"
 
 #define BAD_REQUEST(fd) send_html_response(fd, HTTP_1_1, BAD_REQUEST, "<!DOCTYPE html>"\
     "<html lang=\"en\">"\
@@ -66,6 +68,18 @@
     "</html>"\
     )
 
+#define METHOD_NOT_ALLOWED(fd)  send_html_response(fd, HTTP_1_1, METHOD_NOT_ALLOWED,\
+    "<!DOCTYPE html>"\
+    "<html lang=\"en\">"\
+    "<head>"\
+    "<title>405 Method Not Allowed</title>"\
+    "</head>"\
+    "<body>"\
+    "<h1>405 Method Not Allowed</h1>"\
+    "</body>"\
+    "</html>"\
+    )
+
 static volatile http_server_t server;
 
 const char * rootdir = "public";
@@ -110,7 +124,7 @@ int main(int argc, char **argv)
   }
 
   const uint8_t server_addr[4] = {127,0,0,1};
-  server.serverfd = mkserver_inet(server_addr, 8080, 0xFF);
+  server.serverfd = mkserver_inet(NULL, 8080, 0xFF);
 
   if(server.serverfd < 0)
   {
@@ -126,10 +140,12 @@ int main(int argc, char **argv)
     struct sockaddr_in addr = {};
     socklen_t addr_len = sizeof(addr);
 
-    fd_t confd = accept(server.serverfd, (struct sockaddr *) &addr, &addr_len);
-    if(confd < 0)
+    fd_t *confd = (fd_t *) malloc(sizeof(*confd));
+    *confd = accept(server.serverfd, (struct sockaddr *) &addr, &addr_len);
+    if(*confd < 0)
     {
       fprintf(server.log, "[MAIN] Error handling connection: %m\n");
+      free(confd);
       continue;
     }
     uint32_t ip_addr = *(uint32_t *)&addr.sin_addr;
@@ -141,9 +157,8 @@ int main(int argc, char **argv)
         (ip_addr & 0xFF000000) >> 24,
         ntohs(addr.sin_port));
 
-    FILE * connection = fdopen(confd, "rw");
-    pthread_create(&thread, NULL, worker, (void *) connection);
-    pthread_join(thread, NULL);
+    pthread_create(&thread, NULL, worker, (void *) confd);
+    pthread_detach(thread);
   }
 
   return EXIT_SUCCESS;
@@ -153,8 +168,9 @@ int main(int argc, char **argv)
 // {{{ Worker
 void * worker(void *p)
 {
-  FILE * connection = (FILE *) p;
-  fd_t confd = fileno(connection);
+  FILE * connection = fdopen(*(fd_t *) p, "r");
+  fd_t confd = *(fd_t *) p;
+  free(p);
 
   http_request_t req = {};
 
@@ -164,37 +180,110 @@ void * worker(void *p)
     return NULL;
   }
 
-  char * full_path = (char *) malloc(strlen(rootdir)+strlen(req.url)+1);
+  char *path = (char *) req.url, *query;
+  if((query = strchr(req.url, '?')) != NULL)
+    *query++ = '\0';
+
+  if(req.method != GET)
+  {
+    METHOD_NOT_ALLOWED(confd);
+    goto finish;
+  }
+
+  char * full_path = (char *) malloc(strlen(rootdir)+strlen(path)+1);
   if(full_path == NULL)
   {
     INSUFFICIENT_STORAGE(confd);
     goto finish;
   }
   strcpy(full_path, rootdir);
-  strcat(full_path, req.url);
+  strcat(full_path, path);
 
   fprintf(server.log, "[WORKER] Incoming request! Sending response...\n");
 
-  switch(send_file_response(confd, HTTP_1_1, OK, full_path))
+  DIR *dir;
+  if((dir = opendir(full_path)) == NULL)
+    switch(errno)
+    {
+      case ENOTDIR: // File
+        switch(send_file_response(confd, HTTP_1_1, OK, full_path))
+        {
+          case -1: // Internal Server Error
+            INTERNAL_SERVER_ERROR(confd);
+          break;
+
+          case -2: // Insufficient Storage
+            INSUFFICIENT_STORAGE(confd);
+          break;
+
+          case -3: // Not Found
+            NOT_FOUND(confd);
+          break;
+
+          default:
+          break;
+        }
+        break;
+
+      case ENOENT: // Not found
+        NOT_FOUND(confd);
+        break;
+
+      default: // Other errors
+        INTERNAL_SERVER_ERROR(confd);
+        break;
+    }
+  else // Directory
   {
-    case -1: // Internal Server Error
-      INTERNAL_SERVER_ERROR(confd);
-      break;
+    string_array_t directory = ls(dir);
 
-    case -2: // Insufficient Storage
-      INSUFFICIENT_STORAGE(confd);
-      break;
+    char *list, *path_cpy = strdup(path);
+    *(strrchr(path_cpy, '/') + 1) = '\0';
+    asprintf(&list, "<li><a href=\"%1$s\">Parent Directory</a></li>", path_cpy);
 
-    case -3: // Not Found
-      NOT_FOUND(confd);
-      break;
+    const char *format = (strcmp(path, "/") == 0)                                   
+      ? "<li><a href=\"%2$s%1$s\">%1$s</a></li>"  
+      : "<li><a href=\"%2$s/%1$s\">%1$s</a></li>";
 
-    default:
-      break;
+    for(size_t i = 2; i < directory.len; i++)
+    {
+      char *tmp;
+      asprintf(&tmp, format, directory.start[i], path);
+      strcata(&list, tmp);
+      free(tmp);
+    }
+
+    char *body;
+    asprintf(&body,
+        "<!DOCTYPE html>"
+        "<html lang=\"en\">"
+        "<head>"
+        "<title>Directory listing of %1$s</title>"
+        "</head>"
+        "<body>"
+        "<h1>Directory listing of %1$s</h1>"
+        "<hr>"
+        "<ul>%2$s</ul>"
+        "</body>"
+        "</html>",
+        path,
+        list
+        );
+    free(path_cpy);
+    free(list);
+
+    send_html_response(confd, HTTP_1_1, OK, body);
+
+    free(body);
+    for(size_t i = 0; i < directory.len; i++)
+      free(directory.start[i]);
+    free(directory.start);
   }
 
-  free(full_path);
 finish:
+  if(dir != NULL)
+    closedir(dir);
+  free(full_path);
   if(req.url) free((void *) req.url);
   for(size_t i = 0; i < req.headers_len; i++) {
     free((void *) req.headers[i].name);

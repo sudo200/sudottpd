@@ -56,3 +56,32 @@ size_t fsize(FILE * stream)
   return end - start;
 }
 
+int vasprintf(char **str, const char *format, va_list args)
+{
+  int size = vsnprintf(NULL, 0, format, args) + 1;
+  if(size <= 0)
+    return -1;
+
+  if((*str = (char *) malloc(size)) == NULL)
+    return -1;
+
+  return vsnprintf(*str, size, format, args);
+}
+
+int asprintf(char **str, const char *format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  int ret = vasprintf(str, format, args);
+  va_end(args);
+  return ret;
+}
+
+char * strcata(char **dest, const char *src)
+{
+  const size_t len = strlen(*dest) + strlen(src) + 1;
+  if((*dest = (char *) realloc(*dest, len)) == NULL)
+    return NULL;
+  return strcat(*dest, src);
+}
+

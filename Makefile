@@ -5,7 +5,7 @@ SRCDIR:=./src
 DBG:="gdb"
 MEMCHECK:="valgrind"
 
-CX_FLAGS:=-I./include -s -g
+CX_FLAGS:=-I./include -O2
 C_FLAGS:=
 CPP_FLAGS:=
 LD_FLAGS:=-lpthread -lm
