@@ -179,110 +179,108 @@ void * worker(void *p)
     BAD_REQUEST(confd);
     return NULL;
   }
+  fflush(connection);
+
+  char * full_path;
 
   char *path = (char *) req.url, *query;
   if((query = strchr(req.url, '?')) != NULL)
     *query++ = '\0';
 
-  if(req.method != GET)
-  {
-    METHOD_NOT_ALLOWED(confd);
-    goto finish;
-  }
-
-  char * full_path = (char *) malloc(strlen(rootdir)+strlen(path)+1);
-  if(full_path == NULL)
-  {
-    INSUFFICIENT_STORAGE(confd);
-    goto finish;
-  }
-  strcpy(full_path, rootdir);
-  strcat(full_path, path);
-
-  fprintf(server.log, "[WORKER] Incoming request! Sending response...\n");
-
-  DIR *dir;
-  if((dir = opendir(full_path)) == NULL)
-    switch(errno)
+  do {
+    full_path = (char *) malloc(strlen(rootdir)+strlen(path)+1);
+    if(full_path == NULL)
     {
-      case ENOTDIR: // File
-        switch(send_file_response(confd, HTTP_1_1, OK, full_path))
-        {
+      INSUFFICIENT_STORAGE(confd);
+      break;
+    }
+    strcpy(full_path, rootdir);
+    strcat(full_path, path);
+
+    fprintf(server.log, "[WORKER] Incoming request! Sending response...\n");
+
+    DIR *dir;
+    if((dir = opendir(full_path)) == NULL)
+      switch(errno)
+      {
+        case ENOTDIR: // File
+          switch(send_file_response(confd, HTTP_1_1, OK, full_path))
+          {
           case -1: // Internal Server Error
             INTERNAL_SERVER_ERROR(confd);
-          break;
+            break;
 
           case -2: // Insufficient Storage
             INSUFFICIENT_STORAGE(confd);
-          break;
+            break;
 
           case -3: // Not Found
             NOT_FOUND(confd);
-          break;
+            break;
 
           default:
+            break;
+          }
           break;
-        }
-        break;
 
-      case ENOENT: // Not found
-        NOT_FOUND(confd);
-        break;
+        case ENOENT: // Not found
+          NOT_FOUND(confd);
+          break;
 
-      default: // Other errors
-        INTERNAL_SERVER_ERROR(confd);
-        break;
-    }
-  else // Directory
-  {
-    string_array_t directory = ls(dir);
-
-    char *list, *path_cpy = strdup(path);
-    *(strrchr(path_cpy, '/') + 1) = '\0';
-    asprintf(&list, "<li><a href=\"%1$s\">Parent Directory</a></li>", path_cpy);
-
-    const char *format = (strcmp(path, "/") == 0)                                   
-      ? "<li><a href=\"%2$s%1$s\">%1$s</a></li>"  
-      : "<li><a href=\"%2$s/%1$s\">%1$s</a></li>";
-
-    for(size_t i = 2; i < directory.len; i++)
+        default: // Other errors
+          INTERNAL_SERVER_ERROR(confd);
+          break;
+      }
+    else // Directory
     {
-      char *tmp;
-      asprintf(&tmp, format, directory.start[i], path);
-      strcata(&list, tmp);
-      free(tmp);
+      string_array_t directory = ls(dir);
+      closedir(dir);
+
+      char *list, *path_cpy = strdup(path);
+      *(strrchr(path_cpy, '/') + 1) = '\0';
+      asprintf(&list, "<li><a href=\"%1$s\">Parent Directory</a></li>", path_cpy);
+
+      const char *format = (strcmp(path, "/") == 0)                                   
+        ? "<li><a href=\"%2$s%1$s\">%1$s</a></li>"  
+        : "<li><a href=\"%2$s/%1$s\">%1$s</a></li>";
+
+      for(size_t i = 2; i < directory.len; i++)
+      {
+        char *tmp;
+        asprintf(&tmp, format, directory.start[i], path);
+        strcata(&list, tmp);
+        free(tmp);
+      }
+
+      char *body;
+      asprintf(&body,
+          "<!DOCTYPE html>"
+          "<html lang=\"en\">"
+          "<head>"
+          "<title>Directory listing of %1$s</title>"
+          "</head>"
+          "<body>"
+          "<h1>Directory listing of %1$s</h1>"
+          "<hr>"
+          "<ul>%2$s</ul>"
+          "</body>"
+          "</html>",
+          path,
+          list
+          );
+      free(path_cpy);
+      free(list);
+
+      send_html_response(confd, HTTP_1_1, OK, body);
+
+      free(body);
+      for(size_t i = 0; i < directory.len; i++)
+        free(directory.start[i]);
+      free(directory.start);
     }
-
-    char *body;
-    asprintf(&body,
-        "<!DOCTYPE html>"
-        "<html lang=\"en\">"
-        "<head>"
-        "<title>Directory listing of %1$s</title>"
-        "</head>"
-        "<body>"
-        "<h1>Directory listing of %1$s</h1>"
-        "<hr>"
-        "<ul>%2$s</ul>"
-        "</body>"
-        "</html>",
-        path,
-        list
-        );
-    free(path_cpy);
-    free(list);
-
-    send_html_response(confd, HTTP_1_1, OK, body);
-
-    free(body);
-    for(size_t i = 0; i < directory.len; i++)
-      free(directory.start[i]);
-    free(directory.start);
   }
+  while(0);
 
-finish:
-  if(dir != NULL)
-    closedir(dir);
   free(full_path);
   if(req.url) free((void *) req.url);
   for(size_t i = 0; i < req.headers_len; i++) {

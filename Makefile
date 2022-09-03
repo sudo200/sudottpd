@@ -6,7 +6,7 @@ SRCDIR:=./src
 DBG:="gdb"
 MEMCHECK:="valgrind"
 
-CX_FLAGS:=-I./include -g #-O2
+CX_FLAGS:=-I./include -g -Os
 C_FLAGS:=
 CPP_FLAGS:=
 LD_FLAGS:=-lpthread -lm
@@ -38,5 +38,5 @@ debug: build
 memcheck: build
 	$(MEMCHECK) "$(OUTDIR)/$(OUTFILE)"
 
-.PHONY: clean build test memcheck
+.PHONY: clean build test debug memcheck
 
