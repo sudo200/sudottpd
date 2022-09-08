@@ -29,7 +29,7 @@ int mkserver_unix(const char *path, const int queue)
 
   struct sockaddr_un adr = {};
   adr.sun_family = AF_UNIX;
-  adr.sun_path = path;
+  strncpy(adr.sun_path, path, 108);
   
   if(bind(socketfd, (struct sockaddr *) &adr, sizeof(adr)) < 0)
     return -1;
