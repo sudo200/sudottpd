@@ -24,8 +24,8 @@ all:
 	if [ -f "$(OUTDIR)/$(OUTFILE).dbg" ]; then chmod -x "$(OUTDIR)/$(OUTFILE).dbg"; fi
 
 clean:
-	rm -rf *.o
-	rm -rf $(OUTDIR)
+	$(RM) -r *.o
+	$(RM) -r $(OUTDIR)
 
 build: all
 
@@ -38,5 +38,8 @@ debug: build
 memcheck: build
 	$(MEMCHECK) "$(OUTDIR)/$(OUTFILE)"
 
-.PHONY: clean build test debug memcheck
+compile-config: clean
+	bear -- $(MAKE) build
+
+.PHONY: clean build test debug memcheck compile-config
 
